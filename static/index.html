@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fault-Tolerant Hybrid Agent | DeepMind Hackathon</title>
-    <!-- Modern typography -->
+    <title>FlashDraft | Fault-Tolerant Hybrid Agent</title>
+    <meta name="description" content="Multi-turn conversational video orchestration powered by NB2 Lite and Gemini Omni Flash, with local Gemma 4 fallback.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -21,7 +21,7 @@
             <div class="logo-area">
                 <span class="logo-icon">⚡</span>
                 <div class="logo-text">
-                    <h1>Antigravity</h1>
+                    <h1>FlashDraft</h1>
                     <p>Fault-Tolerant Hybrid Agent</p>
                 </div>
             </div>
@@ -81,17 +81,17 @@
                     <div class="chat-messages" id="chat-messages">
                         <div class="message system-message">
                             <div class="message-content">
-                                Welcome to the **Fault-Tolerant Hybrid Agent** console. 
+                                Welcome to the <strong>Fault-Tolerant Hybrid Agent</strong> console.
                                 <br><br>
-                                Speak or type your request (e.g., *“Make the hovercar in this video fly away”*).
+                                Type your prompt to generate a video via NB2 Lite + Omni Flash. Once a video is generated, send follow-up prompts to do multi-turn style transfers and element swaps.
                                 <br><br>
-                                The local Gemma 4 agent runs fully offline to manage the orchestration flow. If the network drops (or you simulate it using the switch above), the system intercepts the error and executes a local storyboard fallback!
+                                Toggle <strong>Simulate Offline Mode</strong> to see the local Gemma 4 fallback in action.
                             </div>
                         </div>
                     </div>
                     <div class="chat-input-area">
                         <div class="chat-input-wrapper">
-                            <textarea id="chat-input" placeholder="Describe the video action or edit... (e.g., 'Make the hovercar fly away')" rows="2"></textarea>
+                            <textarea id="chat-input" placeholder="Describe the video... (e.g., 'A hovercar flying through a neon-lit city')" rows="2"></textarea>
                             <div class="input-actions">
                                 <button type="button" class="action-btn" id="audio-mic-btn" title="Simulate Audio Input">
                                     <span class="mic-icon">🎤</span>
@@ -121,42 +121,36 @@
                         <span class="header-badge font-mono">ROS2 Orchestration Nodes</span>
                     </div>
                     <div class="pipeline-flow">
-                        <!-- Node 1 -->
                         <div class="flow-node" id="node-sense">
                             <div class="node-icon">🎧</div>
                             <div class="node-title">Sense</div>
                             <div class="node-desc">Ingests Audio/Text</div>
                         </div>
                         <div class="flow-connector" id="conn-1"></div>
-                        <!-- Node 2 -->
                         <div class="flow-node" id="node-decide">
                             <div class="node-icon">🧠</div>
                             <div class="node-title">Decide</div>
                             <div class="node-desc">Gemma 4 Brain</div>
                         </div>
                         <div class="flow-connector" id="conn-2"></div>
-                        <!-- Node 3 (New: NB2 Lite) -->
                         <div class="flow-node" id="node-nb2">
                             <div class="node-icon">🖼️</div>
                             <div class="node-title">NB2 Gen</div>
                             <div class="node-desc">&lt;4s Image Gen</div>
                         </div>
                         <div class="flow-connector" id="conn-3"></div>
-                        <!-- Node 4 (Omni Video) -->
                         <div class="flow-node" id="node-act">
                             <div class="node-icon">⚙️</div>
                             <div class="node-title">Omni Gen</div>
                             <div class="node-desc">Video Edit</div>
                         </div>
                         <div class="flow-connector" id="conn-4"></div>
-                        <!-- Node 5 -->
                         <div class="flow-node" id="node-check">
                             <div class="node-icon">🛡️</div>
                             <div class="node-title">Check</div>
                             <div class="node-desc">Health Verify</div>
                         </div>
                         <div class="flow-connector" id="conn-5"></div>
-                        <!-- Node 6 -->
                         <div class="flow-node" id="node-recover">
                             <div class="node-icon">🔄</div>
                             <div class="node-title">Recover</div>
@@ -174,76 +168,64 @@
                             <button class="tab-btn" data-tab="logs">Execution Logs</button>
                         </div>
                     </div>
-                    
+
                     <div class="tab-contents">
                         <!-- Tab Content: Preview -->
                         <div class="tab-pane active" id="tab-preview">
+
+                            <!-- Initial placeholder -->
                             <div class="output-placeholder" id="preview-placeholder">
                                 <div class="placeholder-icon">🎬</div>
                                 <h3>Ready for input</h3>
-                                <p>Send a prompt to start the Multi-Turn Omni Flash process.</p>
+                                <p>Send a prompt to start the NB2 Lite → Omni Flash pipeline.</p>
                             </div>
 
-                            <!-- Multi-turn Split View: Previous Video + NB2 Edit Preview -->
-                            <div id="multiturn-split" style="display:none; gap: 14px; margin-bottom: 14px; align-items: flex-start;">
-                                <div style="flex:1; min-width:0;">
-                                    <div class="output-success-banner" style="margin-bottom: 8px;">
-                                        <span class="badge" style="background: rgba(255,255,255,0.1); color:#aaa;">PREVIOUS VERSION</span>
-                                        <span style="color: var(--text-secondary); font-size:12px;">Still playing while new edit renders...</span>
-                                    </div>
-                                    <video id="prev-video-player" controls style="width:100%; border-radius:10px; border:1px solid rgba(255,255,255,0.08);"></video>
+                            <!-- NB2 Base Frame: shown on first turn while Omni Flash renders in background -->
+                            <div id="nb2-output-wrapper" style="display:none; flex-direction:column; gap:10px; margin-bottom:14px;">
+                                <div class="output-success-banner" style="background:rgba(136,51,255,0.1); border-color:rgba(136,51,255,0.3); color:#cba4ff;">
+                                    <span class="badge success" style="background:var(--purple-glow);">NB2 LITE BASE FRAME</span>
+                                    <span id="nb2-status-label">Generated &lt;4s — rendering Omni Flash animation in background...</span>
                                 </div>
-                                <div style="flex:1; min-width:0;">
-                                    <div class="output-success-banner" style="margin-bottom: 8px; background: rgba(136, 51, 255, 0.1); border-color: rgba(136, 51, 255, 0.3); color: #cba4ff;">
-                                        <span class="badge success" style="background: var(--purple-glow);">NB2 EDIT PREVIEW</span>
-                                        <span id="nb2-split-label" style="font-size:12px;">Instant style preview &lt;4s</span>
-                                    </div>
-                                    <div style="position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--purple-glow);">
-                                        <img id="nb2-split-image" src="" style="width:100%; display:block; border-radius:10px;" />
-                                        <div id="nb2-generating-overlay" style="display:none; position:absolute; inset:0; background:rgba(3,3,8,0.7); align-items:center; justify-content:center; flex-direction:column; gap:10px; border-radius:10px;">
-                                            <div class="spinner"></div>
-                                            <span style="font-size:12px; color:var(--cyan-glow);">Rendering Omni Flash animation...</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- NB2 Image Output (first-turn) -->
-                            <div class="nb2-container" id="nb2-output-wrapper" style="display: none; align-items: center; flex-direction: column; gap: 10px; margin-bottom: 14px;">
-                                <div class="output-success-banner" style="background: rgba(136, 51, 255, 0.1); border-color: rgba(136, 51, 255, 0.3); color: #cba4ff;">
-                                    <span class="badge success" style="background: var(--purple-glow);">NB2 LITE BASE FRAME</span>
-                                    <span id="nb2-status-label">Generated &lt;4s base frame. Rendering animation in background...</span>
-                                </div>
-                                <div style="position:relative; width:100%; border-radius:8px; overflow:hidden; border:1px solid var(--purple-glow);">
-                                    <img id="nb2-image" src="" style="width:100%; display:block;" />
-                                    <div id="nb2-overlay" style="display:none; position:absolute; inset:0; background:rgba(3,3,8,0.7); align-items:center; justify-content:center; flex-direction:column; gap:10px;">
+                                <div style="position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--purple-glow);">
+                                    <img id="nb2-image" src="" style="width:100%; display:block; min-height:200px; background:#0a0a14;" />
+                                    <div id="nb2-overlay" style="display:flex; position:absolute; inset:0; background:rgba(3,3,8,0.55); align-items:center; justify-content:center; flex-direction:column; gap:10px;">
                                         <div class="spinner"></div>
-                                        <span style="font-size:12px; color:var(--cyan-glow);">Rendering Omni Flash video in background...</span>
+                                        <span style="font-size:12px; color:var(--cyan-glow);">Rendering Omni Flash video...</span>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- Video Player Output -->
-                            <div class="video-container" id="video-output-wrapper" style="display: none;">
-                                <video id="video-player" controls loop></video>
+                            <!-- Main Video Player — NEVER disappears during multi-turn editing -->
+                            <div id="video-output-wrapper" style="display:none; flex-direction:column; position:relative;">
+
+                                <!-- PIP corner overlay: NB2 edit preview appears here during follow-up editing -->
+                                <div id="edit-pip" style="display:none; position:absolute; top:10px; right:10px; width:210px; z-index:20; border-radius:10px; overflow:hidden; border:2px solid var(--purple-glow); box-shadow:0 0 24px rgba(136,51,255,0.5); background:#060610; transition:opacity 0.4s;">
+                                    <div style="padding:5px 10px; background:rgba(136,51,255,0.3); display:flex; align-items:center; gap:6px;">
+                                        <div class="spinner" style="width:12px; height:12px; border-width:2px;"></div>
+                                        <span id="pip-label" style="font-size:10px; color:#cba4ff; font-weight:700; letter-spacing:0.5px;">NB2 EDIT PREVIEW</span>
+                                    </div>
+                                    <img id="pip-nb2-image" src="" style="width:100%; display:block; min-height:118px; background:#0a0a14;" />
+                                    <div id="pip-rendering-label" style="display:none; padding:4px 10px; background:rgba(0,204,255,0.08); border-top:1px solid rgba(0,204,255,0.15); font-size:10px; color:var(--cyan-glow); text-align:center;">Rendering Omni Flash animation…</div>
+                                </div>
+
+                                <video id="video-player" controls loop style="width:100%; border-radius:10px; background:#000; display:block; min-height:200px;"></video>
+
                                 <div style="display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap;">
                                     <div class="output-success-banner" style="flex:1; margin:0;">
                                         <span class="badge success">ONLINE CLOUD ROUTE</span>
                                         <span id="video-turn-label">Rendered via Gemini Omni Flash API</span>
                                     </div>
-                                    <button id="replay-btn" onclick="document.getElementById('video-player').currentTime=0; document.getElementById('video-player').play();" style="padding:8px 18px; background:rgba(0,204,255,0.1); border:1px solid var(--cyan-glow); color:var(--cyan-glow); border-radius:8px; cursor:pointer; font-size:13px; white-space:nowrap;">⟳ Replay</button>
+                                    <button id="replay-btn" style="padding:8px 18px; background:rgba(0,204,255,0.1); border:1px solid var(--cyan-glow); color:var(--cyan-glow); border-radius:8px; cursor:pointer; font-size:13px; white-space:nowrap;">⟳ Replay</button>
                                 </div>
                             </div>
-                            
-                            <!-- Storyboard Output -->
-                            <div class="storyboard-container" id="storyboard-output-wrapper" style="display: none;">
+
+                            <!-- Offline Fallback: Storyboard -->
+                            <div class="storyboard-container" id="storyboard-output-wrapper" style="display:none;">
                                 <div class="output-warning-banner">
                                     <span class="badge warning">OFFLINE FALLBACK</span>
                                     <span id="storyboard-reason">Connection error intercepted. Storyboard fallback generated locally.</span>
                                 </div>
-                                <div class="storyboard-grid" id="storyboard-grid">
-                                    <!-- Storyboard cards injected dynamically -->
-                                </div>
+                                <div class="storyboard-grid" id="storyboard-grid"></div>
                             </div>
                         </div>
 
