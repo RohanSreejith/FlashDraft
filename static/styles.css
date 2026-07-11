@@ -1,28 +1,28 @@
 /* Modern Conversational Video Studio CSS - High-End Matte Charcoal & Royal Purple */
 
 :root {
-    --bg-dark: #070709;
-    --bg-sidebar: #0C0C12;
-    --bg-panel: #11111A;
-    --bg-card: #151522;
-    --border-color: rgba(255, 255, 255, 0.05);
-    --border-hover: rgba(255, 255, 255, 0.1);
+    --bg-dark: #141310;
+    --bg-sidebar: #1d1b17;
+    --bg-panel: #262420;
+    --bg-card: #33302b;
+    --border-color: rgba(237, 230, 214, 0.08);
+    --border-hover: rgba(237, 230, 214, 0.15);
     
-    --accent-primary: #5F45FD;
-    --accent-primary-hover: #4F35E3;
-    --accent-glow: rgba(95, 69, 253, 0.25);
+    --accent-primary: #B23A2E;
+    --accent-primary-hover: #932c21;
+    --accent-glow: rgba(178, 58, 46, 0.25);
     
-    --text-primary: #F3F4F6;
-    --text-secondary: #9CA3AF;
-    --text-muted: #6B7280;
+    --text-primary: #EDE6D6;
+    --text-secondary: rgba(237, 230, 214, 0.7);
+    --text-muted: rgba(237, 230, 214, 0.45);
     
-    --color-success: #10B981;
-    --color-warning: #F59E0B;
-    --color-danger: #EF4444;
+    --color-success: #5C6B57;
+    --color-warning: #D9A441;
+    --color-danger: #B23A2E;
     
-    --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-sans: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
-    --transition-speed: 0.2s;
+    --transition-speed: 0.25s;
 }
 
 * {
@@ -928,7 +928,7 @@ input:checked + .slider:before {
 
 /* Log Console Output */
 .log-console {
-    background: #050508;
+    background: #0e0d0b;
     border: 1px solid var(--border-color);
     border-radius: 8px;
     font-family: var(--font-mono);
@@ -958,4 +958,131 @@ input:checked + .slider:before {
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
+}
+
+/* Cinematic Intro Screen Overlay */
+#intro-screen {
+    position: fixed;
+    inset: 0;
+    background-color: var(--bg-dark);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    animation: fadeOutScreen 0.8s ease-in-out 3.2s forwards;
+    pointer-events: none;
+}
+
+.intro-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.intro-logo {
+    font-size: 64px;
+    color: var(--accent-primary);
+    text-shadow: 0 0 30px var(--accent-glow);
+    animation: pulseLogo 2s infinite ease-in-out;
+    margin-bottom: 20px;
+}
+
+.intro-title {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: 0.25em;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    opacity: 0;
+    transform: translateY(20px);
+    animation: slideUpFade 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
+}
+
+.intro-subtitle {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.35em;
+    color: var(--text-muted);
+    margin-bottom: 40px;
+    opacity: 0;
+    transform: translateY(20px);
+    animation: slideUpFade 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.6s forwards;
+}
+
+.intro-loader {
+    width: 200px;
+    height: 2px;
+    background: rgba(237, 230, 214, 0.08);
+    border-radius: 1px;
+    overflow: hidden;
+}
+
+.intro-loader-progress {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+    transform: translateX(-100%);
+    animation: progressFill 2.5s cubic-bezier(0.65, 0, 0.35, 1) 0.5s forwards;
+}
+
+@keyframes slideUpFade {
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pulseLogo {
+    0%, 100% {
+        transform: scale(1);
+        filter: drop-shadow(0 0 10px var(--accent-glow));
+    }
+    50% {
+        transform: scale(1.15);
+        filter: drop-shadow(0 0 25px var(--accent-primary));
+    }
+}
+
+@keyframes progressFill {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+@keyframes fadeOutScreen {
+    to {
+        opacity: 0;
+        visibility: hidden;
+    }
+}
+
+/* Floating Toast Notification */
+#flashdraft-toast {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) translateY(16px);
+    background: rgba(30, 27, 23, 0.92);
+    border: 1px solid rgba(217, 164, 65, 0.35);
+    color: var(--color-warning);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 10px 20px;
+    border-radius: 100px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(217, 164, 65, 0.1);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 99999;
+    transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+}
+
+#flashdraft-toast.toast-visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
 }
