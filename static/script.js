@@ -27,19 +27,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const nb2StatusLabel = document.getElementById("nb2-status-label");
     const nb2Overlay = document.getElementById("nb2-overlay");
 
-    const multiturnSplit = document.getElementById("multiturn-split");
-    const prevVideoPlayer = document.getElementById("prev-video-player");
-    const nb2SplitImage = document.getElementById("nb2-split-image");
-    const nb2GeneratingOverlay = document.getElementById("nb2-generating-overlay");
-
     const videoOutputWrapper = document.getElementById("video-output-wrapper");
     const videoPlayer = document.getElementById("video-player");
     const videoTurnLabel = document.getElementById("video-turn-label");
+    const editPip = document.getElementById("edit-pip");
+    const pipNb2Image = document.getElementById("pip-nb2-image");
+    const pipRenderingLabel = document.getElementById("pip-rendering-label");
 
     const storyboardOutputWrapper = document.getElementById("storyboard-output-wrapper");
     const storyboardReason = document.getElementById("storyboard-reason");
     const storyboardGrid = document.getElementById("storyboard-grid");
-    
+
     const logConsole = document.getElementById("log-console");
 
     const nodes = {
@@ -64,10 +62,17 @@ document.addEventListener("DOMContentLoaded", () => {
         apiKeyInput.value = savedApiKey;
         updateApiStatusIndicator(true);
     }
-    
+
     let currentInteractionId = null;
+    let sceneContext = null;  // accumulated description for coherent NB2 edit previews
     let pollInterval = null;
-    let displayedLogCount = 0; // to track which logs we've already shown
+    let displayedLogCount = 0;
+
+    // Replay button
+    document.getElementById("replay-btn").addEventListener("click", () => {
+        videoPlayer.currentTime = 0;
+        videoPlayer.play().catch(() => {});
+    });
 
     checkSystemStatus();
     setInterval(checkSystemStatus, 10000);
@@ -174,6 +179,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Mode Toggle status
     function updateModeStatusIndicator(isOffline) {
         if (isOffline) {
             modeStatusPill.querySelector(".status-dot").className = "status-dot danger";
@@ -213,7 +219,6 @@ document.addEventListener("DOMContentLoaded", () => {
     async function syncPipelineNodes(logs, isComplete, source) {
         const sleep = ms => new Promise(res => setTimeout(res, ms));
         
-        // Ensure initial nodes are active
         nodes.sense.classList.add("success");
         connectors.conn1.classList.add("active");
         nodes.decide.classList.add("success");
@@ -267,14 +272,16 @@ document.addEventListener("DOMContentLoaded", () => {
         chatInput.placeholder = "Describe the video action or edit...";
 
         if (!isFollowUp) {
-            // First turn: hide everything, show placeholder until NB2 returns
             previewPlaceholder.style.display = "flex";
             nb2OutputWrapper.style.display = "none";
-            multiturnSplit.style.display = "none";
             videoOutputWrapper.style.display = "none";
             storyboardOutputWrapper.style.display = "none";
+            editPip.style.display = "none";
+        } else {
+            editPip.style.display = "block";
+            pipNb2Image.src = "";
+            pipRenderingLabel.style.display = "none";
         }
-        // Follow-up: leave the existing videoOutputWrapper visible — do nothing yet
 
         const isOfflineSim = offlineToggle.checked;
 
@@ -286,7 +293,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     prompt: text,
                     api_key: savedApiKey,
                     simulate_offline: isOfflineSim,
-                    interaction_id: currentInteractionId
+                    interaction_id: currentInteractionId,
+                    scene_context: sceneContext
                 })
             });
             const data = await res.json();
@@ -294,55 +302,50 @@ document.addEventListener("DOMContentLoaded", () => {
             renderNewLogs(data.logs);
             previewPlaceholder.style.display = "none";
 
-            // Sync storyboard (offline fallback path)
+            // Sync storyboard (offline path completes synchronously)
             if (data.status === "completed") {
+                editPip.style.display = "none";
                 videoOutputWrapper.style.display = "none";
-                multiturnSplit.style.display = "none";
                 await syncPipelineNodes(data.logs, true, data.source);
-                renderCompletedJob(data, isFollowUp);
+                renderCompletedJob(data, isFollowUp, text);
                 return;
             }
 
-            // --- Async video path ---
+            // Async video path
             if (isFollowUp) {
-                // Move current video into the left "previous version" slot
-                prevVideoPlayer.src = videoPlayer.src;
-                prevVideoPlayer.load();
-                prevVideoPlayer.play().catch(() => {});
-
-                // Show split: previous on left, NB2 edit preview on right
-                videoOutputWrapper.style.display = "none";
-                multiturnSplit.style.display = "flex";
-
                 if (data.nb2_image_url) {
-                    nb2SplitImage.src = data.nb2_image_url;
-                    nb2GeneratingOverlay.style.display = "flex";
-                } else {
-                    nb2GeneratingOverlay.style.display = "flex";
+                    const img = new Image();
+                    img.onload = () => {
+                        pipNb2Image.src = data.nb2_image_url;
+                        pipRenderingLabel.style.display = "block";
+                    };
+                    img.src = data.nb2_image_url;
                 }
             } else {
-                // First turn: show NB2 base frame with spinner overlay
                 nb2OutputWrapper.style.display = "flex";
-                nb2Image.src = data.nb2_image_url || "";
-                nb2StatusLabel.textContent = "Generated <4s base frame — rendering Omni Flash animation in background...";
+                if (data.nb2_image_url) {
+                    const img = new Image();
+                    img.onload = () => { nb2Image.src = data.nb2_image_url; };
+                    img.src = data.nb2_image_url;
+                }
                 nb2Overlay.style.display = "flex";
             }
 
             syncPipelineNodes(data.logs, false, null);
 
-            // Start polling for job completion
+            // Poll at 800ms for fast response
             pollInterval = setInterval(async () => {
-                const jobRes = await fetch(`/api/job/${data.job_id}`);
-                const jobData = await jobRes.json();
-
-                renderNewLogs(jobData.logs);
-
-                if (jobData.status === "completed") {
-                    clearInterval(pollInterval);
-                    await syncPipelineNodes(jobData.logs, true, jobData.source);
-                    renderCompletedJob(jobData, isFollowUp);
-                }
-            }, 1500);
+                try {
+                    const jobRes = await fetch(`/api/job/${data.job_id}`);
+                    const jobData = await jobRes.json();
+                    renderNewLogs(jobData.logs);
+                    if (jobData.status === "completed") {
+                        clearInterval(pollInterval);
+                        await syncPipelineNodes(jobData.logs, true, jobData.source);
+                        renderCompletedJob(jobData, isFollowUp, text);
+                    }
+                } catch (e) { /* retry next tick */ }
+            }, 800);
 
         } catch (err) {
             console.error(err);
@@ -352,40 +355,45 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    function renderCompletedJob(data, wasFollowUp) {
-        // Always save state for future follow-ups
-        if (data.interaction_id) {
-            currentInteractionId = data.interaction_id;
+    function renderCompletedJob(data, wasFollowUp, promptText) {
+        if (data.interaction_id) currentInteractionId = data.interaction_id;
+
+        // Update scene context to keep styles unified
+        if (!sceneContext) {
+            sceneContext = promptText;
+        } else {
+            sceneContext = sceneContext + ", then " + promptText;
         }
+
         chatInput.placeholder = currentInteractionId
             ? "Describe an edit... (e.g. 'Make the sky purple')"
-            : "Describe the video action or edit...";
+            : "Describe the video...";
         chatInput.style.borderColor = currentInteractionId ? "var(--purple-glow)" : "";
 
-        // Clean up intermediate states
         nb2OutputWrapper.style.display = "none";
         nb2Overlay.style.display = "none";
-        multiturnSplit.style.display = "none";
-        nb2GeneratingOverlay.style.display = "none";
-        prevVideoPlayer.src = "";
+        editPip.style.display = "none";
+        pipNb2Image.src = "";
 
         if (data.source === "cloud") {
-            // Cross-fade in the new video
             videoOutputWrapper.style.display = "flex";
             videoOutputWrapper.classList.remove("fade-in");
-            void videoOutputWrapper.offsetWidth; // force reflow
+            void videoOutputWrapper.offsetWidth;
             videoOutputWrapper.classList.add("fade-in");
 
             videoPlayer.src = data.video_url;
             videoPlayer.load();
-            videoPlayer.play().catch(e => console.log(e));
+            videoPlayer.addEventListener("canplay", () => {
+                videoPlayer.play().catch(() => {});
+            }, { once: true });
 
-            const turnNum = wasFollowUp ? "Edited" : "Base";
-            videoTurnLabel.textContent = `${turnNum} version rendered via Gemini Omni Flash`;
+            videoTurnLabel.textContent = wasFollowUp
+                ? `Edit #${sceneContext.split(", then ").length} rendered via Gemini Omni Flash`
+                : "Base video rendered via Gemini Omni Flash";
 
             const msg = wasFollowUp
-                ? "✅ Edit applied! The new version is now playing. Send another follow-up to keep editing."
-                : "✅ Base video ready! Send a follow-up prompt to do style transfers, lighting edits, or element swaps.";
+                ? "Edit applied! New version is playing. Send another prompt to keep editing."
+                : "Base video ready! Send a follow-up to do style transfers or element swaps.";
             appendChatMessage("agent", msg);
 
         } else {
@@ -414,7 +422,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function appendChatMessage(sender, text) {
         const msgDiv = document.createElement("div");
         msgDiv.className = `message ${sender}`;
-        let formattedText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+        let formattedText = text.replace(/\*\frac{.*?}/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
         msgDiv.innerHTML = `<div class="message-content">${formattedText}</div>`;
         chatMessages.appendChild(msgDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
