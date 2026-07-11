@@ -23,51 +23,52 @@ def generate_coherent_video_from_image(image_url: str, output_path: str):
     This guarantees 100% visual coherence between the NB2 base frame and the Omni video output!
     """
     try:
-        response = requests.get(image_url, timeout=5)
+        response = requests.get(image_url, timeout=10)
         if response.status_code != 200:
             raise Exception("Failed to download image")
         
-        # Load image bytes into PIL and convert to numpy array (BGR format for OpenCV)
+        # Load image bytes into PIL
         pil_img = Image.open(BytesIO(response.content)).convert('RGB')
         w, h = pil_img.size
         
         # Ensure divisible by 2 for MP4 encoding
         w = (w // 2) * 2
         h = (h // 2) * 2
-        img = cv2.cvtColor(np.array(pil_img.resize((w, h))), cv2.COLOR_RGB2BGR)
         
-        # Set up OpenCV Video Writer (using mp4v codec for standard Windows/Mac playback)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, 30.0, (w, h))
+        import imageio
+        import cv2
+        # imageio uses ffmpeg to create an h264 mp4 which is fully supported by all browsers
+        writer = imageio.get_writer(output_path, fps=30, codec='libx264')
         
+        orig_img = np.array(pil_img)
         frames = 90  # 3 seconds at 30 fps
         for i in range(frames):
-            # Compute a slow, cinematic Ken Burns zoom-in (1.0 to 1.15 scale)
-            scale = 1.0 + (i / frames) * 0.12
-            new_w = int(w * scale)
-            new_h = int(h * scale)
+            # Cinematic camera movement: slow zoom, slight rotation, and horizontal tracking
+            center = (w / 2, h / 2)
+            angle = np.sin(i / 20.0) * 1.5  # Subtle rocking up to 1.5 degrees
+            scale = 1.0 + (i / frames) * 0.25 # 25% zoom over 3 seconds
             
-            resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            M = cv2.getRotationMatrix2D(center, angle, scale)
+            # Add dynamic tracking (pan)
+            M[0, 2] += (i / frames) * 35.0  # Pan right
+            M[1, 2] += np.sin(i / 12.0) * 8.0 # Subtle vertical camera breathing
             
-            # Crop to maintain original dimensions
-            dx = (new_w - w) // 2
-            dy = (new_h - h) // 2
-            crop = resized[dy:dy+h, dx:dx+w]
+            # Apply warp affine
+            frame = cv2.warpAffine(orig_img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
             
             # Add a subtle, dynamic cinematic lighting shift
-            brightness_shift = int(np.sin(i / 15.0) * 8)
-            if brightness_shift > 0:
-                crop = cv2.add(crop, np.ones(crop.shape, dtype=np.uint8) * brightness_shift)
-            else:
-                crop = cv2.subtract(crop, np.ones(crop.shape, dtype=np.uint8) * abs(brightness_shift))
+            brightness_shift = int(np.sin(i / 15.0) * 5)
+            frame_int = frame.astype(np.int16) + brightness_shift
+            frame_clipped = np.clip(frame_int, 0, 255).astype(np.uint8)
                 
-            out.write(crop)
+            writer.append_data(frame_clipped)
             
-        out.release()
+        writer.close()
         return True
     except Exception as e:
         print(f"Error generating coherent video: {e}")
         return False
+
 
 
 app = FastAPI(title="Fault-Tolerant Hybrid Agent Backend")
@@ -208,6 +209,7 @@ def generate_omni_background(job_id: str, prompt: str, interaction_id: Optional[
     filepath = os.path.join("static", "outputs", filename)
     
     use_local_coherent_simulation = False
+    interaction = None
     
     if not api_key or len(api_key) < 15:
         logs.append({"step": "Check", "status": "warning", "message": "No valid API Key. Using local coherent video simulation..."})
@@ -222,35 +224,78 @@ def generate_omni_background(job_id: str, prompt: str, interaction_id: Optional[
             
             logs.append({"step": "Omni_Gen", "status": "info", "message": "Calling Gemini Omni Flash (multimodal)..."})
             
-            contents = []
-            if nb2_response and nb2_response.status_code == 200:
-                contents.append({
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": base64.b64encode(nb2_response.content).decode("utf-8")
-                    }
-                })
-            contents.append(f"Animate this base image. Action: {prompt}. Respect physics, lighting, and camera perspective.")
+            # Build input - text-only works reliably; image format causes 400 from the API
+            # The text prompt will guide Omni to generate the right scene
+            input_text = f"Generate a short cinematic video of: {prompt}. Make it vivid with realistic motion, dynamic lighting, and an immersive feel."
             
             kwargs = {
                 "model": "gemini-omni-flash-preview",
-                "contents": contents,
-                "config": {"response_mime_type": "text/plain"} # Adjust to standard plain text to satisfy validation
+                "input": input_text,
             }
+            if interaction_id:
+                kwargs["previous_interaction_id"] = interaction_id
                 
-            interaction = client.models.generate_content(**kwargs)
+            interaction = client.interactions.create(**kwargs)
             
-            # Save output if genai returned valid video data
-            if hasattr(interaction, "candidates") and interaction.candidates:
-                # If we get content binary video data
-                video_data = base64.b64decode(interaction.candidates[0].content.parts[0].inline_data.data)
+            # SDK adds output_video/output_image/output_text properties via _add_output_properties_if_interaction
+            video_data = None
+            try:
+                # 1. Check SDK convenience property output_video
+                output_video = getattr(interaction, 'output_video', None)
+                if output_video is not None:
+                    vid_data_raw = getattr(output_video, 'data', None) or (output_video.get('data') if isinstance(output_video, dict) else None)
+                    if vid_data_raw:
+                        video_data = base64.b64decode(vid_data_raw)
+                
+                # 2. Walk steps to find model_output with video content
+                if not video_data:
+                    steps = getattr(interaction, 'steps', None)
+                    if isinstance(steps, list):
+                        for step in reversed(steps):
+                            stype = getattr(step, 'type', None) or (step.get('type') if isinstance(step, dict) else None)
+                            if stype == 'model_output':
+                                content = getattr(step, 'content', None) or (step.get('content') if isinstance(step, dict) else [])
+                                if isinstance(content, list):
+                                    for item in content:
+                                        itype = getattr(item, 'type', None) or (item.get('type') if isinstance(item, dict) else None)
+                                        if itype == 'video':
+                                            raw = getattr(item, 'data', None) or (item.get('data') if isinstance(item, dict) else None)
+                                            if raw:
+                                                video_data = base64.b64decode(raw)
+                                                break
+                            if video_data:
+                                break
+                                
+                # 3. Write full debug dump to file regardless for diagnosis
+                with open("debug_log.txt", "w") as dbg:
+                    dbg.write(f"Type: {type(interaction)}\n")
+                    dbg.write(f"Dir: {dir(interaction)}\n")
+                    dbg.write(f"output_video: {getattr(interaction, 'output_video', None)}\n")
+                    dbg.write(f"output_image: {getattr(interaction, 'output_image', None)}\n")
+                    dbg.write(f"output_text:  {getattr(interaction, 'output_text', None)}\n")
+                    dbg.write(f"steps count: {len(getattr(interaction, 'steps', []) or [])}\n")
+                    try:
+                        dbg.write(f"model_dump: {interaction.model_dump()}\n")
+                    except Exception as dump_err:
+                        dbg.write(f"model_dump failed: {dump_err}\n")
+                    dbg.write(f"video_data_found: {video_data is not None}\n")
+                        
+            except Exception as e:
+                print(f"OMNI API EXTRACT ERROR: {e}")
+                import traceback; traceback.print_exc()
+                
+            if video_data:
                 with open(filepath, "wb") as f:
                     f.write(video_data)
-                logs.append({"step": "Check", "status": "success", "message": "Omni Flash video generated successfully."})
+                logs.append({"step": "Omni_Gen", "status": "success", "message": "Omni Flash multimodal generation complete."})
             else:
                 raise Exception("GenAI did not return binary video candidate")
                 
-        except Exception:
+        except Exception as e:
+            print(f"OMNI API ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"OMNI API ERROR: {e}")
             # Clean bypass to local simulation mode - no raw API errors shown to user!
             use_local_coherent_simulation = True
 
@@ -266,27 +311,33 @@ def generate_omni_background(job_id: str, prompt: str, interaction_id: Optional[
                 if os.path.exists("static/outputs/video_template.mp4"):
                     shutil.copy("static/outputs/video_template.mp4", filepath)
                 else:
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    out = cv2.VideoWriter(filepath, fourcc, 1.0, (640, 360))
+                    import imageio
+                    writer = imageio.get_writer(filepath, fps=1.0, codec='libx264')
                     for _ in range(3):
-                        out.write(np.zeros((360, 640, 3), dtype=np.uint8))
-                    out.release()
+                        writer.append_data(np.zeros((360, 640, 3), dtype=np.uint8))
+                    writer.close()
         else:
             import shutil
             if os.path.exists("static/outputs/video_template.mp4"):
                 shutil.copy("static/outputs/video_template.mp4", filepath)
             else:
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                out = cv2.VideoWriter(filepath, fourcc, 1.0, (640, 360))
+                import imageio
+                writer = imageio.get_writer(filepath, fps=1.0, codec='libx264')
                 for _ in range(3):
-                    out.write(np.zeros((360, 640, 3), dtype=np.uint8))
-                out.release()
+                    writer.append_data(np.zeros((360, 640, 3), dtype=np.uint8))
+                writer.close()
+
+    real_interaction_id = None
+    if not use_local_coherent_simulation and interaction and hasattr(interaction, 'id') and interaction.id:
+        real_interaction_id = interaction.id
+    else:
+        real_interaction_id = interaction_id or str(uuid.uuid4())
 
     JOBS[job_id].update({
         "status": "completed",
         "success": True,
         "source": "cloud",
-        "interaction_id": str(uuid.uuid4()),
+        "interaction_id": real_interaction_id,
         "video_url": f"/static/outputs/{filename}",
         "storyboard": None,
         "logs": logs
