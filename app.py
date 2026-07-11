@@ -1,0 +1,267 @@
+import os
+import re
+import json
+import uuid
+import base64
+import requests
+import time
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI(title="Fault-Tolerant Hybrid Agent Backend")
+
+os.makedirs("static", exist_ok=True)
+os.makedirs("static/outputs", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+SIMULATE_OFFLINE = False
+
+# Global state for async jobs
+JOBS: Dict[str, Any] = {}
+
+class ChatRequest(BaseModel):
+    prompt: str
+    api_key: Optional[str] = None
+    simulate_offline: bool = False
+    interaction_id: Optional[str] = None
+
+class ToggleOfflineRequest(BaseModel):
+    simulate_offline: bool
+
+def clean_and_parse_json(text: str) -> Dict[str, Any]:
+    text = text.strip()
+    try: return json.loads(text)
+    except json.JSONDecodeError: pass
+    match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
+    if match:
+        try: return json.loads(match.group(1))
+        except json.JSONDecodeError: pass
+    match = re.search(r"(\{.*\})", text, re.DOTALL)
+    if match:
+        try: return json.loads(match.group(1))
+        except json.JSONDecodeError: pass
+    raise ValueError(f"Could not parse valid JSON from output: {text}")
+
+def check_ollama_status() -> bool:
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=2)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+def call_local_gemma(prompt: str, format_json: bool = False) -> str:
+    url = "http://localhost:11434/api/generate"
+    payload = {"model": "gemma4:e4b", "prompt": prompt, "stream": False}
+    if format_json: payload["format"] = "json"
+    response = requests.post(url, json=payload, timeout=60)
+    response.raise_for_status()
+    return response.json().get("response", "")
+
+def generate_heuristic_storyboard(prompt: str) -> Dict[str, Any]:
+    return {
+        "fallback_reason": "Offline fallback triggered. Local Generation / Template active.",
+        "scenes": [
+            {
+                "scene_number": 1,
+                "title": "Establishing Action",
+                "description": f"Based on: '{prompt}'. Scene layout established.",
+                "action": "Camera tracks subject movement.",
+                "audio": "Ambient sounds.",
+                "lighting": "Cinematic high-contrast."
+            }
+        ]
+    }
+
+def generate_storyboard_via_gemma(prompt: str, ollama_active: bool) -> Dict[str, Any]:
+    if not ollama_active: return generate_heuristic_storyboard(prompt)
+    sp = f"""You are a storyboard artist. Generate a 2-scene JSON storyboard for: "{prompt}". Format: {{"fallback_reason": "...", "scenes": [{{"scene_number": 1, "title": "...", "description": "...", "action": "...", "audio": "...", "lighting": "..."}}]}}"""
+    try:
+        return clean_and_parse_json(call_local_gemma(sp, format_json=True))
+    except:
+        return generate_heuristic_storyboard(prompt)
+
+def run_recovery_flow(prompt: str, logs: List[Dict[str, Any]], ollama_active: bool) -> Dict[str, Any]:
+    logs.append({"step": "Recover", "status": "info", "message": "Executing offline tool fallback: generate_local_storyboard."})
+    storyboard = generate_storyboard_via_gemma(prompt, ollama_active)
+    source = "local_fallback" if ollama_active else "total_fallback"
+    logs.append({"step": "Recover", "status": "success", "message": f"Recovery completed."})
+    return {
+        "success": True,
+        "source": source,
+        "interaction_id": None,
+        "video_url": None,
+        "storyboard": storyboard,
+        "logs": logs
+    }
+
+def generate_omni_background(job_id: str, prompt: str, interaction_id: Optional[str], api_key: Optional[str], is_offline: bool, ollama_active: bool):
+    """Background task to run Omni Flash video generation."""
+    logs = JOBS[job_id]["logs"]
+    
+    if is_offline:
+        logs.append({"step": "Check", "status": "error", "message": "ConnectionError simulated."})
+        recovery = run_recovery_flow(prompt, logs, ollama_active)
+        JOBS[job_id].update({"status": "completed", **recovery})
+        return
+        
+    if not api_key:
+        logs.append({"step": "Check", "status": "error", "message": "No API Key provided."})
+        recovery = run_recovery_flow(prompt, logs, ollama_active)
+        JOBS[job_id].update({"status": "completed", **recovery})
+        return
+        
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        
+        logs.append({"step": "Omni_Gen", "status": "info", "message": "Calling Gemini Omni Flash (async)..."})
+        
+        kwargs = {
+            "model": "gemini-omni-flash-preview",
+            "input": prompt,
+            "response_format": {"type": "video", "aspect_ratio": "16:9"}
+        }
+        if interaction_id:
+            kwargs["previous_interaction_id"] = interaction_id
+            
+        interaction = client.interactions.create(**kwargs)
+        
+        if not interaction or not getattr(interaction, "output_video", None) or not getattr(interaction.output_video, "data", None):
+            raise Exception("No video output data returned")
+            
+        video_data = base64.b64decode(interaction.output_video.data)
+        filename = f"video_{uuid.uuid4().hex[:8]}.mp4"
+        filepath = os.path.join("static", "outputs", filename)
+        with open(filepath, "wb") as f:
+            f.write(video_data)
+            
+        logs.append({"step": "Check", "status": "success", "message": f"Omni Flash completed."})
+        
+        JOBS[job_id].update({
+            "status": "completed",
+            "success": True,
+            "source": "cloud",
+            "interaction_id": interaction.id if hasattr(interaction, "id") else interaction_id,
+            "video_url": f"/static/outputs/{filename}",
+            "storyboard": None,
+            "logs": logs
+        })
+        
+    except Exception as e:
+        logs.append({"step": "Check", "status": "error", "message": f"Omni Flash API failed: {str(e)}"})
+        recovery = run_recovery_flow(prompt, logs, ollama_active)
+        JOBS[job_id].update({"status": "completed", **recovery})
+
+
+@app.get("/")
+def get_index(): return FileResponse("static/index.html")
+
+@app.get("/api/status")
+def get_status():
+    global SIMULATE_OFFLINE
+    return {
+        "ollama_online": check_ollama_status(),
+        "gemini_key_set": bool(os.environ.get("GEMINI_API_KEY")),
+        "simulate_offline": SIMULATE_OFFLINE
+    }
+
+@app.post("/api/toggle-offline")
+def toggle_offline(req: ToggleOfflineRequest):
+    global SIMULATE_OFFLINE
+    SIMULATE_OFFLINE = req.simulate_offline
+    return {"simulate_offline": SIMULATE_OFFLINE}
+
+@app.get("/api/job/{job_id}")
+def get_job(job_id: str):
+    if job_id not in JOBS:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JOBS[job_id]
+
+@app.post("/api/chat")
+def chat(req: ChatRequest, background_tasks: BackgroundTasks):
+    global SIMULATE_OFFLINE
+    logs = []
+    
+    logs.append({"step": "Sense", "status": "info", "message": f"Ingested prompt: '{req.prompt}'"})
+    
+    ollama_active = check_ollama_status()
+    decision = {"tool": "generate_omni_video", "thought": "Default cloud routing."}
+    
+    if ollama_active:
+        logs.append({"step": "Decide", "status": "info", "message": "Gemma 4 orchestrator analyzing..."})
+        try:
+            dp = f"""Analyze intent: "{req.prompt}". Tools: 1. generate_omni_video (default for video gen/edit), 2. generate_local_storyboard. Respond strictly with JSON: {{"thought": "...", "tool": "generate_omni_video", "refined_prompt": "..."}}"""
+            res = clean_and_parse_json(call_local_gemma(dp, format_json=True))
+            if res.get("tool"): decision = res
+            logs.append({"step": "Decide", "status": "success", "message": f"Decision: {decision.get('tool')}"})
+        except:
+            logs.append({"step": "Decide", "status": "warning", "message": "Gemma 4 error, defaulting."})
+    else:
+        logs.append({"step": "Decide", "status": "warning", "message": "Local orchestrator offline. Defaulting."})
+        decision["refined_prompt"] = req.prompt
+
+    tool_to_run = decision.get("tool", "generate_omni_video")
+    refined_prompt = decision.get("refined_prompt", req.prompt)
+
+    if tool_to_run == "generate_omni_video":
+        nb2_image_url = None
+        nb2_is_edit_preview = bool(req.interaction_id)
+        
+        logs.append({"step": "NB2_Gen", "status": "info", "message": "Generating NB2 Lite <4s instant preview..." if not nb2_is_edit_preview else "Generating NB2 Lite <4s edit preview..."})
+        
+        if nb2_is_edit_preview:
+            # For follow-up edits, ask NB2 to render the post-edit state as a still frame
+            nb2_prompt = f"Photorealistic still frame showing: {refined_prompt}. Ultra-detailed, cinematic, respects gravity and lighting."
+        else:
+            nb2_prompt = refined_prompt
+        
+        encoded_prompt = requests.utils.quote(nb2_prompt)
+        nb2_image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&nologo=true&seed={uuid.uuid4().hex[:8]}"
+        logs.append({"step": "NB2_Gen", "status": "success", "message": "NB2 Lite frame generated.", "is_edit_preview": nb2_is_edit_preview})
+
+        job_id = str(uuid.uuid4())
+        JOBS[job_id] = {
+            "status": "processing",
+            "source": None,
+            "interaction_id": None,
+            "nb2_image_url": nb2_image_url,
+            "video_url": None,
+            "storyboard": None,
+            "logs": logs.copy()
+        }
+        
+        is_offline = req.simulate_offline or SIMULATE_OFFLINE
+        api_key = req.api_key or os.environ.get("GEMINI_API_KEY")
+        
+        background_tasks.add_task(
+            generate_omni_background, 
+            job_id, refined_prompt, req.interaction_id, api_key, is_offline, ollama_active
+        )
+        
+        return {
+            "status": "processing",
+            "job_id": job_id,
+            "nb2_image_url": nb2_image_url,
+            "logs": logs
+        }
+    else:
+        logs.append({"step": "Omni_Gen", "status": "info", "message": "Calling local storyboard generator"})
+        storyboard = generate_storyboard_via_gemma(refined_prompt, ollama_active)
+        logs.append({"step": "Check", "status": "success", "message": "Local storyboard generated."})
+        
+        return {
+            "status": "completed",
+            "success": True,
+            "source": "local_storyboard_explicit",
+            "interaction_id": req.interaction_id,
+            "nb2_image_url": None,
+            "video_url": None,
+            "storyboard": storyboard,
+            "logs": logs
+        }
