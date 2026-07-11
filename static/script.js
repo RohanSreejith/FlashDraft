@@ -1,6 +1,14 @@
 // Frontend Script for Fault-Tolerant Hybrid Agent
 
 document.addEventListener("DOMContentLoaded", () => {
+    // Remove intro screen after animation completes
+    const introScreen = document.getElementById("intro-screen");
+    if (introScreen) {
+        setTimeout(() => {
+            introScreen.remove();
+        }, 4000);
+    }
+
     // DOM Elements
     const ollamaStatusPill = document.getElementById("ollama-status");
     const apiStatusPill = document.getElementById("api-status");
@@ -68,6 +76,29 @@ document.addEventListener("DOMContentLoaded", () => {
     let sceneContext = null;  // accumulated description for coherent NB2 edit previews
     let pollInterval = null;
     let displayedLogCount = 0;
+    let pendingOfflinePrompt = null; // stores prompt queued while offline
+    let lastVideoUrl = null;         // stores last successfully generated video URL
+    let isOfflineQueuing = false;
+    
+    // ── Offline / Online detection ──────────────────────────────────────────────
+    function handleOnline() {
+        if (pendingOfflinePrompt && isOfflineQueuing) {
+            appendLog("Network", "Connection restored! Retrying queued prompt...", "success-log");
+            appendChatMessage("agent", "**Connection restored!** Sending your queued prompt now...");
+            const { text, isFollowUp } = pendingOfflinePrompt;
+            pendingOfflinePrompt = null;
+            isOfflineQueuing = false;
+            chatInput.value = text;
+            sendMessage();
+        }
+    }
+    
+    function handleOffline() {
+        appendLog("Network", "Connection lost! Prompt will be queued and retried automatically.", "warning-log");
+    }
+    
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
 
     // Replay button
     document.getElementById("replay-btn").addEventListener("click", () => {
@@ -119,31 +150,64 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    let audioTimerInterval = null;
+    // ── Real microphone recording via Web Speech API ─────────────────────────
+    let recognition = null;
     micBtn.addEventListener("click", () => {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            appendLog("Audio", "Speech recognition not supported in this browser.", "warning-log");
+            return;
+        }
+        
+        if (recognition) {
+            recognition.stop();
+            return;
+        }
+        
+        recognition = new SpeechRecognition();
+        recognition.lang = "en-US";
+        recognition.interimResults = true;
+        recognition.continuous = false;
+        
         audioFeedback.style.display = "flex";
         chatInput.disabled = true;
-        let sec = 3;
-        audioFeedback.querySelector("#audio-timer").textContent = `Listening... (0:0${sec})`;
+        micBtn.style.color = "var(--color-danger)";
+        audioFeedback.querySelector("#audio-timer").textContent = "Listening...";
         
-        audioTimerInterval = setInterval(() => {
-            sec--;
-            if (sec > 0) {
-                audioFeedback.querySelector("#audio-timer").textContent = `Listening... (0:0${sec})`;
-            } else {
-                clearInterval(audioTimerInterval);
-                audioFeedback.style.display = "none";
-                chatInput.disabled = false;
-                chatInput.value = "Swap the neon lights to green";
-                appendLog("Audio Ingestion", "Simulated speech transcribed", "success-log");
+        recognition.onresult = (event) => {
+            const transcript = Array.from(event.results)
+                .map(r => r[0].transcript)
+                .join("");
+            audioFeedback.querySelector("#audio-timer").textContent = `"${transcript}"...`;
+            chatInput.value = transcript;
+        };
+        
+        recognition.onend = () => {
+            recognition = null;
+            audioFeedback.style.display = "none";
+            chatInput.disabled = false;
+            micBtn.style.color = "";
+            if (chatInput.value.trim()) {
+                appendLog("Audio Ingestion", `Transcribed: "${chatInput.value.trim()}"`, "success-log");
             }
-        }, 1000);
+        };
+        
+        recognition.onerror = (e) => {
+            recognition = null;
+            audioFeedback.style.display = "none";
+            chatInput.disabled = false;
+            micBtn.style.color = "";
+            appendLog("Audio", `Microphone error: ${e.error}`, "warning-log");
+        };
+        
+        recognition.start();
     });
 
     cancelAudioBtn.addEventListener("click", () => {
-        if (audioTimerInterval) clearInterval(audioTimerInterval);
+        if (recognition) { recognition.stop(); recognition = null; }
         audioFeedback.style.display = "none";
         chatInput.disabled = false;
+        micBtn.style.color = "";
     });
 
     sendBtn.addEventListener("click", sendMessage);
@@ -352,9 +416,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
         } catch (err) {
             console.error(err);
-            previewPlaceholder.style.display = "flex";
-            previewPlaceholder.querySelector("h3").textContent = "Critical Error";
-            previewPlaceholder.querySelector("p").textContent = err.message;
+            const isActuallyOffline = !navigator.onLine;
+            
+            if (isActuallyOffline) {
+                // Store prompt and show previous video if available
+                isOfflineQueuing = true;
+                pendingOfflinePrompt = { text, isFollowUp };
+                appendLog("Network", "No connection detected. Prompt queued — will retry when back online.", "warning-log");
+                
+                // Show small toast notification
+                showToast("📶 No internet — your video will arrive when the connection is back.");
+                
+                // Show last generated video cleanly if there is one
+                if (lastVideoUrl) {
+                    previewPlaceholder.style.display = "none";
+                    videoOutputWrapper.style.display = "flex";
+                    videoControlsInfo.style.display = "flex";
+                    videoPlayer.src = lastVideoUrl;
+                    videoPlayer.load();
+                    videoTurnLabel.textContent = "⚡ Offline — showing last generated video";
+                } else {
+                    previewPlaceholder.style.display = "flex";
+                    previewPlaceholder.querySelector("h3").textContent = "Offline — Queued";
+                    previewPlaceholder.querySelector("p").textContent = "Your video will arrive when the internet connection is back.";
+                }
+            } else {
+                previewPlaceholder.style.display = "flex";
+                previewPlaceholder.querySelector("h3").textContent = "Critical Error";
+                previewPlaceholder.querySelector("p").textContent = err.message;
+            }
         }
     }
 
@@ -386,6 +476,7 @@ document.addEventListener("DOMContentLoaded", () => {
             videoOutputWrapper.classList.add("fade-in");
 
             videoPlayer.src = data.video_url;
+            lastVideoUrl = data.video_url; // save for offline fallback
             videoPlayer.load();
             videoPlayer.addEventListener("canplay", () => {
                 videoPlayer.play().catch(() => {});
@@ -431,5 +522,23 @@ document.addEventListener("DOMContentLoaded", () => {
         msgDiv.innerHTML = `<div class="message-content">${formattedText}</div>`;
         chatMessages.appendChild(msgDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function showToast(message, duration = 4000) {
+        const existing = document.getElementById("flashdraft-toast");
+        if (existing) existing.remove();
+
+        const toast = document.createElement("div");
+        toast.id = "flashdraft-toast";
+        toast.textContent = message;
+        document.body.appendChild(toast);
+
+        // Trigger enter animation
+        requestAnimationFrame(() => toast.classList.add("toast-visible"));
+
+        setTimeout(() => {
+            toast.classList.remove("toast-visible");
+            setTimeout(() => toast.remove(), 400);
+        }, duration);
     }
 });
