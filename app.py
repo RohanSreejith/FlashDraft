@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     api_key: Optional[str] = None
     simulate_offline: bool = False
     interaction_id: Optional[str] = None
+    scene_context: Optional[str] = None
 
 class ToggleOfflineRequest(BaseModel):
     simulate_offline: bool
@@ -48,20 +49,57 @@ def clean_and_parse_json(text: str) -> Dict[str, Any]:
         except json.JSONDecodeError: pass
     raise ValueError(f"Could not parse valid JSON from output: {text}")
 
-def check_ollama_status() -> bool:
+# Auto-detect local backend: llama.cpp (port 8080) or Ollama (port 11434)
+LLAMA_CPP_URL = "http://localhost:8080"
+OLLAMA_URL = "http://localhost:11434"
+
+def detect_local_backend():
+    """Returns ('llamacpp', url) or ('ollama', url) or (None, None)"""
     try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=2)
-        return response.status_code == 200
+        r = requests.get(f"{LLAMA_CPP_URL}/health", timeout=2)
+        if r.status_code == 200:
+            return 'llamacpp', LLAMA_CPP_URL
     except Exception:
-        return False
+        pass
+    try:
+        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=2)
+        if r.status_code == 200:
+            return 'ollama', OLLAMA_URL
+    except Exception:
+        pass
+    return None, None
+
+def check_ollama_status() -> bool:
+    backend, _ = detect_local_backend()
+    return backend is not None
 
 def call_local_gemma(prompt: str, format_json: bool = False) -> str:
-    url = "http://localhost:11434/api/generate"
-    payload = {"model": "gemma4:e4b", "prompt": prompt, "stream": False}
-    if format_json: payload["format"] = "json"
-    response = requests.post(url, json=payload, timeout=60)
-    response.raise_for_status()
-    return response.json().get("response", "")
+    backend, base_url = detect_local_backend()
+    
+    if backend == 'llamacpp':
+        # llama.cpp server API
+        payload = {
+            "prompt": f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n",
+            "n_predict": 1024,
+            "temperature": 0.7,
+            "stop": ["<end_of_turn>", "<start_of_turn>"]
+        }
+        if format_json:
+            payload["grammar"] = 'root   ::= object\nvalue  ::= object | array | string | number | ("true" | "false" | "null") ws\nobject ::= "{" ws (string ":" ws value ("," ws string ":" ws value)*)? "}" ws\narray  ::= "[" ws (value ("," ws value)*)? "]" ws\nstring ::= "\"" ([^\"\\] | "\\" (["\\bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]))* "\"" ws\nnumber ::= "-"? ([0-9] | [1-9] [0-9]*) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? ws\nws     ::= ([ \t\n] ws)?'
+        response = requests.post(f"{base_url}/completion", json=payload, timeout=60)
+        response.raise_for_status()
+        return response.json().get("content", "")
+    
+    elif backend == 'ollama':
+        # Ollama API
+        payload = {"model": "gemma4:e4b", "prompt": prompt, "stream": False}
+        if format_json: payload["format"] = "json"
+        response = requests.post(f"{base_url}/api/generate", json=payload, timeout=60)
+        response.raise_for_status()
+        return response.json().get("response", "")
+    
+    else:
+        raise Exception("No local backend available")
 
 def generate_heuristic_storyboard(prompt: str) -> Dict[str, Any]:
     return {
@@ -216,8 +254,9 @@ def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         logs.append({"step": "NB2_Gen", "status": "info", "message": "Generating NB2 Lite <4s instant preview..." if not nb2_is_edit_preview else "Generating NB2 Lite <4s edit preview..."})
         
         if nb2_is_edit_preview:
-            # For follow-up edits, ask NB2 to render the post-edit state as a still frame
-            nb2_prompt = f"Photorealistic still frame showing: {refined_prompt}. Ultra-detailed, cinematic, respects gravity and lighting."
+            # Combine the original scene context with the new edit request to ensure visual coherence!
+            context_prefix = f"Photorealistic still frame. Previously: {req.scene_context}. Now edit it to show: {refined_prompt}."
+            nb2_prompt = f"{context_prefix} Cinematic, ultra-detailed, respects lighting, perspective and physics."
         else:
             nb2_prompt = refined_prompt
         
