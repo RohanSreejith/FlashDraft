@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fault-Tolerant Hybrid Agent | DeepMind Hackathon</title>
+    <!-- Modern typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="glow-orb" id="orb-1"></div>
+    <div class="glow-orb" id="orb-2"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <span class="logo-icon">⚡</span>
+                <div class="logo-text">
+                    <h1>Antigravity</h1>
+                    <p>Fault-Tolerant Hybrid Agent</p>
+                </div>
+            </div>
+            <div class="status-container">
+                <div class="status-pill" id="ollama-status">
+                    <span class="status-dot warning"></span>
+                    <span class="status-label">Local Gemma: Checking...</span>
+                </div>
+                <div class="status-pill" id="api-status">
+                    <span class="status-dot warning"></span>
+                    <span class="status-label">Gemini API: Unconfigured</span>
+                </div>
+                <div class="status-pill" id="mode-status">
+                    <span class="status-dot success"></span>
+                    <span class="status-label">Mode: Online</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="workspace">
+            <!-- Left Side: Controls & Chat -->
+            <section class="left-panel">
+                <!-- Settings Panel -->
+                <div class="dashboard-card settings-card">
+                    <div class="card-header">
+                        <h2>System Configuration</h2>
+                        <span class="header-badge">Control Hub</span>
+                    </div>
+                    <div class="settings-grid">
+                        <div class="setting-item">
+                            <label for="api-key-input">Gemini API Key</label>
+                            <div class="input-wrapper">
+                                <input type="password" id="api-key-input" placeholder="Enter API Key or set GEMINI_API_KEY env" />
+                                <button type="button" id="save-key-btn" title="Save API Key">Save</button>
+                            </div>
+                        </div>
+                        <div class="setting-item toggle-item">
+                            <div class="toggle-info">
+                                <span class="toggle-title">Simulate Offline Mode</span>
+                                <span class="toggle-desc">Cuts cloud connection, forces local fallback checks</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="offline-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Interface -->
+                <div class="dashboard-card chat-card">
+                    <div class="card-header">
+                        <h2>Agent Interaction Console</h2>
+                        <span class="live-indicator">LIVE</span>
+                    </div>
+                    <div class="chat-messages" id="chat-messages">
+                        <div class="message system-message">
+                            <div class="message-content">
+                                Welcome to the **Fault-Tolerant Hybrid Agent** console. 
+                                <br><br>
+                                Speak or type your request (e.g., *“Make the hovercar in this video fly away”*).
+                                <br><br>
+                                The local Gemma 4 agent runs fully offline to manage the orchestration flow. If the network drops (or you simulate it using the switch above), the system intercepts the error and executes a local storyboard fallback!
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <div class="chat-input-wrapper">
+                            <textarea id="chat-input" placeholder="Describe the video action or edit... (e.g., 'Make the hovercar fly away')" rows="2"></textarea>
+                            <div class="input-actions">
+                                <button type="button" class="action-btn" id="audio-mic-btn" title="Simulate Audio Input">
+                                    <span class="mic-icon">🎤</span>
+                                </button>
+                                <button type="button" class="send-btn" id="send-btn">
+                                    <span class="send-icon">✦</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="audio-feedback" id="audio-feedback" style="display: none;">
+                            <span class="audio-wave">
+                                <span></span><span></span><span></span><span></span><span></span>
+                            </span>
+                            <span id="audio-timer">Recording simulated audio...</span>
+                            <button type="button" class="cancel-audio-btn" id="cancel-audio-btn">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Side: Pipeline Graph & Outputs -->
+            <section class="right-panel">
+                <!-- Visual Pipeline -->
+                <div class="dashboard-card pipeline-card">
+                    <div class="card-header">
+                        <h2>Sense-Decide-Act-Check-Recover Loop</h2>
+                        <span class="header-badge font-mono">ROS2 Orchestration Nodes</span>
+                    </div>
+                    <div class="pipeline-flow">
+                        <!-- Node 1 -->
+                        <div class="flow-node" id="node-sense">
+                            <div class="node-icon">🎧</div>
+                            <div class="node-title">Sense</div>
+                            <div class="node-desc">Ingests Audio/Text</div>
+                        </div>
+                        <div class="flow-connector" id="conn-1"></div>
+                        <!-- Node 2 -->
+                        <div class="flow-node" id="node-decide">
+                            <div class="node-icon">🧠</div>
+                            <div class="node-title">Decide</div>
+                            <div class="node-desc">Gemma 4 Brain</div>
+                        </div>
+                        <div class="flow-connector" id="conn-2"></div>
+                        <!-- Node 3 (New: NB2 Lite) -->
+                        <div class="flow-node" id="node-nb2">
+                            <div class="node-icon">🖼️</div>
+                            <div class="node-title">NB2 Gen</div>
+                            <div class="node-desc">&lt;4s Image Gen</div>
+                        </div>
+                        <div class="flow-connector" id="conn-3"></div>
+                        <!-- Node 4 (Omni Video) -->
+                        <div class="flow-node" id="node-act">
+                            <div class="node-icon">⚙️</div>
+                            <div class="node-title">Omni Gen</div>
+                            <div class="node-desc">Video Edit</div>
+                        </div>
+                        <div class="flow-connector" id="conn-4"></div>
+                        <!-- Node 5 -->
+                        <div class="flow-node" id="node-check">
+                            <div class="node-icon">🛡️</div>
+                            <div class="node-title">Check</div>
+                            <div class="node-desc">Health Verify</div>
+                        </div>
+                        <div class="flow-connector" id="conn-5"></div>
+                        <!-- Node 6 -->
+                        <div class="flow-node" id="node-recover">
+                            <div class="node-icon">🔄</div>
+                            <div class="node-title">Recover</div>
+                            <div class="node-desc">Local Fallback</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Response Output Viewer -->
+                <div class="dashboard-card output-card">
+                    <div class="card-header">
+                        <h2>Execution Output</h2>
+                        <div class="tabs">
+                            <button class="tab-btn active" data-tab="preview">Visual Preview</button>
+                            <button class="tab-btn" data-tab="logs">Execution Logs</button>
+                        </div>
+                    </div>
+                    
+                    <div class="tab-contents">
+                        <!-- Tab Content: Preview -->
+                        <div class="tab-pane active" id="tab-preview">
+                            <div class="output-placeholder" id="preview-placeholder">
+                                <div class="placeholder-icon">🎬</div>
+                                <h3>Ready for input</h3>
+                                <p>Send a prompt to start the Multi-Turn Omni Flash process.</p>
+                            </div>
+
+                            <!-- Multi-turn Split View: Previous Video + NB2 Edit Preview -->
+                            <div id="multiturn-split" style="display:none; gap: 14px; margin-bottom: 14px; align-items: flex-start;">
+                                <div style="flex:1; min-width:0;">
+                                    <div class="output-success-banner" style="margin-bottom: 8px;">
+                                        <span class="badge" style="background: rgba(255,255,255,0.1); color:#aaa;">PREVIOUS VERSION</span>
+                                        <span style="color: var(--text-secondary); font-size:12px;">Still playing while new edit renders...</span>
+                                    </div>
+                                    <video id="prev-video-player" controls style="width:100%; border-radius:10px; border:1px solid rgba(255,255,255,0.08);"></video>
+                                </div>
+                                <div style="flex:1; min-width:0;">
+                                    <div class="output-success-banner" style="margin-bottom: 8px; background: rgba(136, 51, 255, 0.1); border-color: rgba(136, 51, 255, 0.3); color: #cba4ff;">
+                                        <span class="badge success" style="background: var(--purple-glow);">NB2 EDIT PREVIEW</span>
+                                        <span id="nb2-split-label" style="font-size:12px;">Instant style preview &lt;4s</span>
+                                    </div>
+                                    <div style="position:relative; border-radius:10px; overflow:hidden; border:1px solid var(--purple-glow);">
+                                        <img id="nb2-split-image" src="" style="width:100%; display:block; border-radius:10px;" />
+                                        <div id="nb2-generating-overlay" style="display:none; position:absolute; inset:0; background:rgba(3,3,8,0.7); align-items:center; justify-content:center; flex-direction:column; gap:10px; border-radius:10px;">
+                                            <div class="spinner"></div>
+                                            <span style="font-size:12px; color:var(--cyan-glow);">Rendering Omni Flash animation...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- NB2 Image Output (first-turn) -->
+                            <div class="nb2-container" id="nb2-output-wrapper" style="display: none; align-items: center; flex-direction: column; gap: 10px; margin-bottom: 14px;">
+                                <div class="output-success-banner" style="background: rgba(136, 51, 255, 0.1); border-color: rgba(136, 51, 255, 0.3); color: #cba4ff;">
+                                    <span class="badge success" style="background: var(--purple-glow);">NB2 LITE BASE FRAME</span>
+                                    <span id="nb2-status-label">Generated &lt;4s base frame. Rendering animation in background...</span>
+                                </div>
+                                <div style="position:relative; width:100%; border-radius:8px; overflow:hidden; border:1px solid var(--purple-glow);">
+                                    <img id="nb2-image" src="" style="width:100%; display:block;" />
+                                    <div id="nb2-overlay" style="display:none; position:absolute; inset:0; background:rgba(3,3,8,0.7); align-items:center; justify-content:center; flex-direction:column; gap:10px;">
+                                        <div class="spinner"></div>
+                                        <span style="font-size:12px; color:var(--cyan-glow);">Rendering Omni Flash video in background...</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Video Player Output -->
+                            <div class="video-container" id="video-output-wrapper" style="display: none;">
+                                <video id="video-player" controls loop></video>
+                                <div style="display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap;">
+                                    <div class="output-success-banner" style="flex:1; margin:0;">
+                                        <span class="badge success">ONLINE CLOUD ROUTE</span>
+                                        <span id="video-turn-label">Rendered via Gemini Omni Flash API</span>
+                                    </div>
+                                    <button id="replay-btn" onclick="document.getElementById('video-player').currentTime=0; document.getElementById('video-player').play();" style="padding:8px 18px; background:rgba(0,204,255,0.1); border:1px solid var(--cyan-glow); color:var(--cyan-glow); border-radius:8px; cursor:pointer; font-size:13px; white-space:nowrap;">⟳ Replay</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Storyboard Output -->
+                            <div class="storyboard-container" id="storyboard-output-wrapper" style="display: none;">
+                                <div class="output-warning-banner">
+                                    <span class="badge warning">OFFLINE FALLBACK</span>
+                                    <span id="storyboard-reason">Connection error intercepted. Storyboard fallback generated locally.</span>
+                                </div>
+                                <div class="storyboard-grid" id="storyboard-grid">
+                                    <!-- Storyboard cards injected dynamically -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tab Content: Logs -->
+                        <div class="tab-pane" id="tab-logs">
+                            <div class="log-console" id="log-console">
+                                <div class="log-line system-log">[System Initialized] Waiting for interaction...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
