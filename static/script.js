@@ -30,6 +30,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const videoOutputWrapper = document.getElementById("video-output-wrapper");
     const videoPlayer = document.getElementById("video-player");
     const videoTurnLabel = document.getElementById("video-turn-label");
+    const videoControlsInfo = document.getElementById("video-controls-info");
     const editPip = document.getElementById("edit-pip");
     const pipNb2Image = document.getElementById("pip-nb2-image");
     const pipRenderingLabel = document.getElementById("pip-rendering-label");
@@ -275,6 +276,7 @@ document.addEventListener("DOMContentLoaded", () => {
             previewPlaceholder.style.display = "flex";
             nb2OutputWrapper.style.display = "none";
             videoOutputWrapper.style.display = "none";
+            videoControlsInfo.style.display = "none";
             storyboardOutputWrapper.style.display = "none";
             editPip.style.display = "none";
         } else {
@@ -306,6 +308,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.status === "completed") {
                 editPip.style.display = "none";
                 videoOutputWrapper.style.display = "none";
+                videoControlsInfo.style.display = "none";
                 await syncPipelineNodes(data.logs, true, data.source);
                 renderCompletedJob(data, isFollowUp, text);
                 return;
@@ -377,6 +380,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (data.source === "cloud") {
             videoOutputWrapper.style.display = "flex";
+            videoControlsInfo.style.display = "flex";
             videoOutputWrapper.classList.remove("fade-in");
             void videoOutputWrapper.offsetWidth;
             videoOutputWrapper.classList.add("fade-in");
@@ -398,6 +402,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         } else {
             videoOutputWrapper.style.display = "none";
+            videoControlsInfo.style.display = "none";
             storyboardOutputWrapper.style.display = "flex";
             storyboardReason.textContent = data.storyboard.fallback_reason || "Connection dropped. Storyboard fallback generated locally.";
 
@@ -422,7 +427,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function appendChatMessage(sender, text) {
         const msgDiv = document.createElement("div");
         msgDiv.className = `message ${sender}`;
-        let formattedText = text.replace(/\*\frac{.*?}/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+        let formattedText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
         msgDiv.innerHTML = `<div class="message-content">${formattedText}</div>`;
         chatMessages.appendChild(msgDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
